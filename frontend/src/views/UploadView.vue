@@ -39,7 +39,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { initUpload, uploadChunk, mergeChunks } from '../api/file'
-import { sm3Hash } from '../utils/sm-crypto'
+import { StreamingSm3 } from '../utils/sm-crypto'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
@@ -73,20 +73,24 @@ function formatSize(bytes) {
 }
 
 async function computeFileHash(file) {
-  // 对大文件分块计算SM3哈希
-  const blobSlice = File.prototype.slice
-  const chunkSize = 2 * 1024 * 1024
-  const chunks = Math.ceil(file.size / chunkSize)
-  let currentChunk = 0
-  // 简化：对整个文件内容做SM3（对于极大文件可能需要WebWorker）
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const hash = sm3Hash(new Uint8Array(e.target.result))
-      resolve(hash)
+  // 流式分块计算SM3哈希，避免将整个大文件加载到内存
+  const hasher = new StreamingSm3()
+  const CHUNK_SIZE = 2 * 1024 * 1024 // 2MB per chunk
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE
+    const end = Math.min(start + CHUNK_SIZE, file.size)
+    const blob = file.slice(start, end)
+    const buffer = await blob.arrayBuffer()
+    hasher.update(new Uint8Array(buffer))
+
+    // 让出主线程，避免UI卡死
+    if (i % 5 === 0) {
+      await new Promise(resolve => setTimeout(resolve, 0))
     }
-    reader.readAsArrayBuffer(file)
-  })
+  }
+  return hasher.digest()
 }
 
 async function handleUpload() {
