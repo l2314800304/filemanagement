@@ -9,8 +9,11 @@ import com.filemgmt.domain.file.valueobject.ChunkRange;
 import com.filemgmt.interfaces.common.Result;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -24,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 
 @Slf4j
+@Validated
 @RestController
 @RequestMapping("/api/file")
 public class FileController {
@@ -41,7 +45,7 @@ public class FileController {
      * 初始化上传（秒传检测）
      */
     @PostMapping("/upload/init")
-    public Result<Map<String, Object>> initUpload(@RequestBody InitUploadRequest request,
+    public Result<Map<String, Object>> initUpload(@Valid @RequestBody InitUploadRequest request,
                                                    HttpServletRequest httpReq) {
         User user = getCurrentUser(httpReq);
         Map<String, Object> result = fileApplicationService.initUpload(
@@ -55,10 +59,13 @@ public class FileController {
      */
     @PostMapping("/upload/chunk")
     public Result<Map<String, Object>> uploadChunk(
-            @RequestParam("uploadId") Long uploadId,
-            @RequestParam("chunkIndex") Integer chunkIndex,
+            @RequestParam("uploadId") @NotNull(message = "uploadId不能为空") Long uploadId,
+            @RequestParam("chunkIndex") @NotNull(message = "chunkIndex不能为空") @Min(value = 0, message = "chunkIndex不能小于0") Integer chunkIndex,
             @RequestParam(value = "chunkHash", required = false) String chunkHash,
             @RequestParam("file") MultipartFile file) throws IOException {
+        if (file.isEmpty()) {
+            throw new IllegalArgumentException("分片文件不能为空");
+        }
         byte[] data = file.getBytes();
         Map<String, Object> result = fileApplicationService.uploadChunk(uploadId, chunkIndex, chunkHash, data);
         return Result.success(result);
@@ -68,7 +75,7 @@ public class FileController {
      * 合并分片
      */
     @PostMapping("/upload/merge")
-    public Result<Map<String, Object>> mergeChunks(@RequestBody MergeRequest request) throws IOException {
+    public Result<Map<String, Object>> mergeChunks(@Valid @RequestBody MergeRequest request) throws IOException {
         Map<String, Object> result = fileApplicationService.mergeChunks(request.getUploadId(), request.getFileHash());
         return Result.success(result);
     }
@@ -77,7 +84,7 @@ public class FileController {
      * 取消上传
      */
     @PostMapping("/upload/cancel")
-    public Result<Void> cancelUpload(@RequestBody CancelRequest request) throws IOException {
+    public Result<Void> cancelUpload(@Valid @RequestBody CancelRequest request) throws IOException {
         fileApplicationService.cancelUpload(request.getUploadId());
         return Result.success("上传已取消", null);
     }
@@ -87,8 +94,8 @@ public class FileController {
      */
     @GetMapping("/list")
     public Result<Map<String, Object>> listFiles(
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "1") @Min(value = 1, message = "页码最小为1") int page,
+            @RequestParam(defaultValue = "20") @Min(value = 1, message = "每页数量最小为1") @Max(value = 100, message = "每页数量最大为100") int size,
             HttpServletRequest httpReq) {
         User user = getCurrentUser(httpReq);
         Map<String, Object> result = fileApplicationService.listFiles(user.getId(), page, size);
@@ -117,7 +124,7 @@ public class FileController {
      * 文件详情
      */
     @GetMapping("/{id}")
-    public Result<Map<String, Object>> getFileDetail(@PathVariable Long id) {
+    public Result<Map<String, Object>> getFileDetail(@PathVariable @NotNull(message = "文件ID不能为空") Long id) {
         FileMetadata metadata = fileApplicationService.getFileDetail(id);
         Map<String, Object> data = new HashMap<>();
         data.put("id", metadata.getId());
@@ -181,21 +188,37 @@ public class FileController {
 
     @Data
     public static class InitUploadRequest {
+        @NotBlank(message = "文件名不能为空")
+        @Size(max = 255, message = "文件名不能超过255个字符")
         private String fileName;
+
+        @NotNull(message = "文件大小不能为空")
+        @Min(value = 1, message = "文件大小必须大于0")
         private Long fileSize;
+
+        @Size(min = 32, max = 128, message = "文件哈希长度不合法")
         private String fileHash;
+
+        @NotNull(message = "总分片数不能为空")
+        @Min(value = 1, message = "总分片数至少为1")
         private Integer totalChunks;
+
+        @Min(value = 1, message = "分片大小必须大于0")
         private Long chunkSize;
     }
 
     @Data
     public static class MergeRequest {
+        @NotNull(message = "uploadId不能为空")
         private Long uploadId;
+
+        @Size(min = 32, max = 128, message = "文件哈希长度不合法")
         private String fileHash;
     }
 
     @Data
     public static class CancelRequest {
+        @NotNull(message = "uploadId不能为空")
         private Long uploadId;
     }
 }
