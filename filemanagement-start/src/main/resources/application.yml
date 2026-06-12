@@ -1,0 +1,34 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/filemanagement?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true
+    username: root
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 50MB
+
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+
+filemanagement:
+  storage:
+    base-path: ./storage
+    temp-path: ./storage/temp
+    chunk-size: 5242880
+  crypto:
+    sm2-curve: sm2p256v1
+    sm4-transform: SM4/ECB/PKCS5Padding
+
+logging:
+  level:
+    com.filemgmt: debug

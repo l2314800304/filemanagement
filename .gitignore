@@ -1,0 +1,49 @@
+# ========================
+# Java / Maven
+# ========================
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+.mtj.tmp/
+hs_err_pid*
+
+# ========================
+# IDE
+# ========================
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+
+# ========================
+# OS
+# ========================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ========================
+# Frontend
+# ========================
+frontend/node_modules/
+frontend/dist/
+
+# ========================
+# Storage (runtime)
+# ========================
+storage/
+
+# ========================
+# Environment
+# ========================
+.env
+.env.local
+.env.*.local
