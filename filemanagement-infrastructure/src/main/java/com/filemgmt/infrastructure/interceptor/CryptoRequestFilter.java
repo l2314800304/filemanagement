@@ -1,6 +1,7 @@
 package com.filemgmt.infrastructure.interceptor;
 
 import com.filemgmt.domain.crypto.service.CryptoDomainService;
+import com.filemgmt.domain.crypto.service.Sm4SessionAttribute;
 import com.filemgmt.infrastructure.crypto.Sm2KeyManager;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
@@ -30,16 +31,8 @@ public class CryptoRequestFilter implements Filter {
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
             throws IOException, ServletException {
         if (request instanceof HttpServletRequest httpReq) {
-            String path = httpReq.getRequestURI();
-
-            // 排除不需要解密的路径
-            if (path.contains("/crypto/public-key") || path.contains("/upload/chunk")
-                    || path.contains("/download")) {
-                chain.doFilter(request, response);
-                return;
-            }
-
-            String encryptedSm4Key = httpReq.getHeader(CryptoInterceptor.ENCRYPTED_SM4_KEY_HEADER);
+            String encryptedSm4Key = httpReq.getHeader(Sm4SessionAttribute.ENCRYPTED_SM4_KEY_HEADER);
+            // 仅当请求头包含加密的SM4密钥时才解密请求体
             if (encryptedSm4Key != null && !encryptedSm4Key.isEmpty()) {
                 // 解密SM4密钥
                 String sm4KeyHex = cryptoService.sm2Decrypt(encryptedSm4Key, sm2KeyManager.getPrivateKeyHex());

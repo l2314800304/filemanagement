@@ -1,6 +1,8 @@
 package com.filemgmt.infrastructure.interceptor;
 
 import com.filemgmt.domain.crypto.service.CryptoDomainService;
+import com.filemgmt.domain.crypto.service.SkipEncryption;
+import com.filemgmt.domain.crypto.service.Sm4SessionAttribute;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.MethodParameter;
@@ -14,6 +16,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 
 /**
  * 响应体SM4加密拦截器
+ * 对所有接口响应进行SM4加密，除非方法标注了 @SkipEncryption
  */
 @RestControllerAdvice(basePackages = "com.filemgmt.interfaces")
 public class CryptoResponseAdvice implements ResponseBodyAdvice<Object> {
@@ -28,10 +31,12 @@ public class CryptoResponseAdvice implements ResponseBodyAdvice<Object> {
 
     @Override
     public boolean supports(MethodParameter returnType, Class<? extends HttpMessageConverter<?>> converterType) {
-        // 对需要加密的接口进行加密（排除public-key和download接口）
-        String methodName = returnType.getMethod() != null ? returnType.getMethod().getName() : "";
-        return !methodName.equals("getPublicKey") && !methodName.equals("downloadFile")
-                && !methodName.equals("uploadChunk");
+        // 标注了 @SkipEncryption 的方法不加密
+        if (returnType.hasMethodAnnotation(SkipEncryption.class)) {
+            return false;
+        }
+        // 其余所有接口都加密
+        return true;
     }
 
     @Override
@@ -40,7 +45,8 @@ public class CryptoResponseAdvice implements ResponseBodyAdvice<Object> {
                                    ServerHttpRequest request, ServerHttpResponse response) {
         if (request instanceof ServletServerHttpRequest servletRequest) {
             HttpServletRequest httpReq = servletRequest.getServletRequest();
-            String sm4Key = CryptoInterceptor.getSm4Key(httpReq);
+            Object keyObj = httpReq.getAttribute(Sm4SessionAttribute.SM4_KEY);
+            String sm4Key = keyObj != null ? keyObj.toString() : null;
             if (sm4Key != null) {
                 try {
                     String json = objectMapper.writeValueAsString(body);

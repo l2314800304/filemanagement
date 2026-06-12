@@ -5,14 +5,14 @@ import { ElMessage } from 'element-plus'
 
 const api = axios.create({
   baseURL: 'http://localhost:8080',
-  timeout: 120000
+  timeout: 300000 // 5分钟，大文件加密需要较长时间
 })
 
 // 缓存SM2公钥
 let sm2PublicKey = null
 
 /**
- * 获取SM2公钥
+ * 获取SM2公钥（不加密的引导接口）
  */
 async function fetchPublicKey() {
   if (sm2PublicKey) return sm2PublicKey
@@ -25,7 +25,7 @@ async function fetchPublicKey() {
 }
 
 /**
- * 请求拦截器 - SM4加密请求体
+ * 请求拦截器 - 对所有请求进行SM4加密
  */
 api.interceptors.request.use(async (config) => {
   // 添加认证Token
@@ -34,13 +34,10 @@ api.interceptors.request.use(async (config) => {
     config.headers['X-Auth-Token'] = authStore.token
   }
 
-  // 不需要加密的路径
-  const skipPaths = ['/api/crypto/public-key', '/api/file/upload/chunk', '/api/file/list', '/api/file']
-  const isDownload = config.url && config.url.includes('/download')
-  const isChunkUpload = config.url && config.url.includes('/upload/chunk')
-  const isSkipPath = skipPaths.some(p => config.url === p) || isDownload || isChunkUpload
-
-  if (isSkipPath) return config
+  // 仅 /api/crypto/public-key 不加密（引导接口）
+  if (config.url && config.url.includes('/crypto/public-key')) {
+    return config
+  }
 
   // 获取SM2公钥
   try {
@@ -53,7 +50,7 @@ api.interceptors.request.use(async (config) => {
     const encryptedSm4Key = sm2Encrypt(sm4Key, publicKey)
     config.headers['X-Encrypted-SM4-Key'] = encryptedSm4Key
 
-    // SM4加密请求体
+    // SM4加密请求体（仅对有body的请求）
     if (config.data && typeof config.data === 'object' && !(config.data instanceof FormData)) {
       const jsonStr = JSON.stringify(config.data)
       const encrypted = sm4Encrypt(jsonStr, sm4Key)
@@ -71,23 +68,16 @@ api.interceptors.request.use(async (config) => {
 })
 
 /**
- * 响应拦截器 - SM4解密响应体
+ * 响应拦截器 - 对所有响应进行SM4解密
  */
 api.interceptors.response.use(
   (response) => {
-    const isDownload = response.config.url && response.config.url.includes('/download')
-    const isChunkUpload = response.config.url && response.config.url.includes('/upload/chunk')
-    const isListOrDetail = response.config.url && (
-      response.config.url.includes('/api/file/list') ||
-      (response.config.url.match(/\/api\/file\/\d+$/) && !response.config.url.includes('/download'))
-    )
-    const isPublicKey = response.config.url && response.config.url.includes('/public-key')
-
-    if (isDownload || isChunkUpload || isPublicKey) {
+    // 仅 /api/crypto/public-key 不解密
+    if (response.config.url && response.config.url.includes('/crypto/public-key')) {
       return response
     }
 
-    // SM4解密响应
+    // SM4解密响应体
     const sm4Key = response.config._sm4Key
     if (sm4Key && typeof response.data === 'string') {
       try {
@@ -99,7 +89,7 @@ api.interceptors.response.use(
     }
 
     // 统一错误处理
-    if (response.data && response.data.code !== 200) {
+    if (response.data && response.data.code !== undefined && response.data.code !== 200) {
       ElMessage.error(response.data.message || '请求失败')
       return Promise.reject(new Error(response.data.message))
     }
@@ -108,6 +98,20 @@ api.interceptors.response.use(
   },
   (error) => {
     if (error.response && error.response.data) {
+      // 尝试解密错误响应
+      const sm4Key = error.config?._sm4Key
+      if (sm4Key && typeof error.response.data === 'string') {
+        try {
+          const decrypted = sm4Decrypt(error.response.data, sm4Key)
+          const parsed = JSON.parse(decrypted)
+          if (parsed.message) {
+            ElMessage.error(parsed.message)
+            return Promise.reject(new Error(parsed.message))
+          }
+        } catch (e) {
+          // 解密失败，使用默认消息
+        }
+      }
       const msg = error.response.data.message || '请求失败'
       ElMessage.error(msg)
     } else {

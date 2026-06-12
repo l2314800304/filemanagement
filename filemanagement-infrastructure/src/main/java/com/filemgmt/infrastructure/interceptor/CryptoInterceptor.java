@@ -1,22 +1,20 @@
 package com.filemgmt.infrastructure.interceptor;
 
 import com.filemgmt.domain.crypto.service.CryptoDomainService;
+import com.filemgmt.domain.crypto.service.Sm4SessionAttribute;
 import com.filemgmt.infrastructure.crypto.Sm2KeyManager;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.apache.commons.codec.binary.Hex;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
  * 国密加密通信拦截器
+ * 从请求头 X-Encrypted-SM4-Key 取出SM2加密的SM4密钥，
+ * 用服务端SM2私钥解密后存入request attribute供后续使用。
  */
 @Component
 public class CryptoInterceptor implements HandlerInterceptor {
-
-    public static final String SM4_KEY_ATTRIBUTE = "sm4_key";
-    public static final String ENCRYPTED_SM4_KEY_HEADER = "X-Encrypted-SM4-Key";
-    public static final String AUTH_TOKEN_HEADER = "X-Auth-Token";
 
     private final CryptoDomainService cryptoService;
     private final Sm2KeyManager sm2KeyManager;
@@ -28,20 +26,20 @@ public class CryptoInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        String encryptedSm4Key = request.getHeader(ENCRYPTED_SM4_KEY_HEADER);
+        String encryptedSm4Key = request.getHeader(Sm4SessionAttribute.ENCRYPTED_SM4_KEY_HEADER);
         if (encryptedSm4Key != null && !encryptedSm4Key.isEmpty()) {
             // 用SM2私钥解密SM4密钥
             String sm4KeyHex = cryptoService.sm2Decrypt(encryptedSm4Key, sm2KeyManager.getPrivateKeyHex());
-            request.setAttribute(SM4_KEY_ATTRIBUTE, sm4KeyHex);
+            request.setAttribute(Sm4SessionAttribute.SM4_KEY, sm4KeyHex);
         }
         return true;
     }
 
     /**
-     * 从请求中获取SM4密钥
+     * 从请求中获取SM4密钥（hex字符串）
      */
     public static String getSm4Key(HttpServletRequest request) {
-        Object key = request.getAttribute(SM4_KEY_ATTRIBUTE);
+        Object key = request.getAttribute(Sm4SessionAttribute.SM4_KEY);
         return key != null ? key.toString() : null;
     }
 }

@@ -3,25 +3,23 @@ package com.filemgmt.interfaces.file;
 import com.filemgmt.application.auth.AuthApplicationService;
 import com.filemgmt.application.file.FileApplicationService;
 import com.filemgmt.domain.auth.entity.User;
+import com.filemgmt.domain.crypto.service.CryptoDomainService;
+import com.filemgmt.domain.crypto.service.Sm4SessionAttribute;
 import com.filemgmt.domain.file.entity.FileMetadata;
 import com.filemgmt.domain.file.service.FileStoragePort;
-import com.filemgmt.domain.file.valueobject.ChunkRange;
 import com.filemgmt.interfaces.common.Result;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.RandomAccessFile;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,11 +32,14 @@ public class FileController {
 
     private final FileApplicationService fileApplicationService;
     private final AuthApplicationService authApplicationService;
+    private final CryptoDomainService cryptoService;
 
     public FileController(FileApplicationService fileApplicationService,
-                          AuthApplicationService authApplicationService) {
+                          AuthApplicationService authApplicationService,
+                          CryptoDomainService cryptoService) {
         this.fileApplicationService = fileApplicationService;
         this.authApplicationService = authApplicationService;
+        this.cryptoService = cryptoService;
     }
 
     /**
@@ -55,19 +56,24 @@ public class FileController {
     }
 
     /**
-     * 上传单个分片（不加密，二进制流）
+     * 上传单个分片（JSON格式，分片数据经SM4加密后以base64传输）
      */
     @PostMapping("/upload/chunk")
     public Result<Map<String, Object>> uploadChunk(
-            @RequestParam("uploadId") @NotNull(message = "uploadId不能为空") Long uploadId,
-            @RequestParam("chunkIndex") @NotNull(message = "chunkIndex不能为空") @Min(value = 0, message = "chunkIndex不能小于0") Integer chunkIndex,
-            @RequestParam(value = "chunkHash", required = false) String chunkHash,
-            @RequestParam("file") MultipartFile file) throws IOException {
-        if (file.isEmpty()) {
-            throw new IllegalArgumentException("分片文件不能为空");
+            @Valid @RequestBody ChunkUploadRequest request,
+            HttpServletRequest httpReq) throws IOException {
+        // 从请求属性中获取SM4密钥（由CryptoInterceptor设置）
+        String sm4Key = (String) httpReq.getAttribute(Sm4SessionAttribute.SM4_KEY);
+        if (sm4Key == null) {
+            throw new IllegalStateException("缺少SM4加密密钥，请检查请求头 X-Encrypted-SM4-Key");
         }
-        byte[] data = file.getBytes();
-        Map<String, Object> result = fileApplicationService.uploadChunk(uploadId, chunkIndex, chunkHash, data);
+
+        // 解密分片数据：SM4解密 → base64字符串 → 原始字节
+        String chunkBase64 = cryptoService.sm4Decrypt(request.getChunkData(), sm4Key);
+        byte[] chunkBytes = Base64.getDecoder().decode(chunkBase64);
+
+        Map<String, Object> result = fileApplicationService.uploadChunk(
+                request.getUploadId(), request.getChunkIndex(), request.getChunkHash(), chunkBytes);
         return Result.success(result);
     }
 
@@ -138,44 +144,35 @@ public class FileController {
     }
 
     /**
-     * 文件下载（支持Range断点续传，不加密）
+     * 文件下载（文件数据经SM4加密后以base64返回）
      */
     @GetMapping("/{id}/download")
-    public void downloadFile(@PathVariable Long id,
-                             HttpServletRequest request,
-                             HttpServletResponse response) throws IOException {
+    public Result<Map<String, Object>> downloadFile(@PathVariable Long id,
+                                                     HttpServletRequest httpReq) throws IOException {
         FileMetadata metadata = fileApplicationService.getFileDetail(id);
         FileStoragePort storagePort = fileApplicationService.getFileStoragePort();
 
-        String rangeHeader = request.getHeader("Range");
-        ChunkRange range = fileApplicationService.calculateDownloadRange(rangeHeader, metadata.getFileSize());
-
-        response.setContentType(metadata.getMimeType() != null ? metadata.getMimeType() : "application/octet-stream");
-        response.setHeader("Accept-Ranges", "bytes");
-        response.setHeader("Content-Disposition",
-                "attachment; filename=\"" + URLEncoder.encode(metadata.getFileName(), StandardCharsets.UTF_8) + "\"");
-
-        if (rangeHeader != null) {
-            response.setStatus(HttpServletResponse.SC_PARTIAL_CONTENT);
-            response.setHeader("Content-Range", range.toContentRangeHeader());
-        } else {
-            response.setStatus(HttpServletResponse.SC_OK);
+        // 读取文件全部字节
+        byte[] fileBytes;
+        try (RandomAccessFile raf = storagePort.openRandomAccess(metadata.getStoragePath())) {
+            fileBytes = new byte[Math.toIntExact(metadata.getFileSize())];
+            raf.readFully(fileBytes);
         }
-        response.setHeader("Content-Length", String.valueOf(range.getContentLength()));
 
-        try (RandomAccessFile raf = storagePort.openRandomAccess(metadata.getStoragePath());
-             OutputStream os = response.getOutputStream()) {
-            raf.seek(range.getStart());
-            byte[] buffer = new byte[8192];
-            long remaining = range.getContentLength();
-            while (remaining > 0) {
-                int toRead = (int) Math.min(buffer.length, remaining);
-                int read = raf.read(buffer, 0, toRead);
-                if (read == -1) break;
-                os.write(buffer, 0, read);
-                remaining -= read;
-            }
+        // SM4加密文件数据
+        String sm4Key = (String) httpReq.getAttribute(Sm4SessionAttribute.SM4_KEY);
+        if (sm4Key == null) {
+            throw new IllegalStateException("缺少SM4加密密钥，请检查请求头 X-Encrypted-SM4-Key");
         }
+        String fileBase64 = Base64.getEncoder().encodeToString(fileBytes);
+        String encryptedHex = cryptoService.sm4Encrypt(fileBase64, sm4Key);
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("fileName", metadata.getFileName());
+        data.put("fileSize", metadata.getFileSize());
+        data.put("mimeType", metadata.getMimeType() != null ? metadata.getMimeType() : "application/octet-stream");
+        data.put("fileData", encryptedHex);
+        return Result.success(data);
     }
 
     private User getCurrentUser(HttpServletRequest request) {
@@ -185,6 +182,8 @@ public class FileController {
         }
         return authApplicationService.findByToken(token);
     }
+
+    // ==================== 请求DTO ====================
 
     @Data
     public static class InitUploadRequest {
@@ -205,6 +204,21 @@ public class FileController {
 
         @Min(value = 1, message = "分片大小必须大于0")
         private Long chunkSize;
+    }
+
+    @Data
+    public static class ChunkUploadRequest {
+        @NotNull(message = "uploadId不能为空")
+        private Long uploadId;
+
+        @NotNull(message = "chunkIndex不能为空")
+        @Min(value = 0, message = "chunkIndex不能小于0")
+        private Integer chunkIndex;
+
+        private String chunkHash;
+
+        @NotBlank(message = "分片数据不能为空")
+        private String chunkData; // SM4加密后的hex字符串
     }
 
     @Data

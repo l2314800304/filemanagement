@@ -3,6 +3,7 @@ package com.filemgmt.interfaces.crypto;
 import com.filemgmt.domain.crypto.service.CryptoDomainService;
 import com.filemgmt.domain.crypto.service.Sm2KeyPort;
 import com.filemgmt.interfaces.common.Result;
+import com.filemgmt.domain.crypto.service.SkipEncryption;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -23,8 +24,9 @@ public class CryptoController {
     }
 
     /**
-     * 获取SM2公钥（不加密）
+     * 获取SM2公钥（不加密，引导接口）
      */
+    @SkipEncryption
     @GetMapping("/public-key")
     public Result<Map<String, String>> getPublicKey() {
         Map<String, String> data = Map.of("publicKey", sm2KeyPort.getPublicKeyHex());
