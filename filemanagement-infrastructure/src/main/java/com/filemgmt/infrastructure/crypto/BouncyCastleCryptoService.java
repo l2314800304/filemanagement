@@ -143,13 +143,29 @@ public class BouncyCastleCryptoService implements CryptoDomainService {
     @Override
     public String sm4Encrypt(String plainText, String sm4KeyHex) {
         try {
-            byte[] keyBytes = Hex.decodeHex(sm4KeyHex.toCharArray());
+            // 验证输入参数
+            if (sm4KeyHex == null || sm4KeyHex.trim().isEmpty()) {
+                throw new IllegalArgumentException("SM4密钥不能为空");
+            }
+            
+            // 验证十六进制格式
+            String normalizedKey = sm4KeyHex.trim().toLowerCase();
+            if (!normalizedKey.matches("[0-9a-f]+")) {
+                log.error("SM4加密失败 - 密钥格式错误: 包含非十六进制字符. 密钥前缀: {}", 
+                        normalizedKey.length() > 4 ? normalizedKey.substring(0, 4) : normalizedKey);
+                throw new IllegalArgumentException("SM4密钥格式错误：必须是有效的十六进制字符串(0-9, a-f)");
+            }
+            
+            byte[] keyBytes = Hex.decodeHex(normalizedKey.toCharArray());
             SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "SM4");
             Cipher cipher = Cipher.getInstance("SM4/ECB/PKCS5Padding", "BC");
             cipher.init(Cipher.ENCRYPT_MODE, keySpec);
             byte[] encrypted = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
             return Hex.encodeHexString(encrypted);
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (Exception e) {
+            log.error("SM4加密失败", e);
             throw new RuntimeException("SM4加密失败", e);
         }
     }
@@ -157,14 +173,40 @@ public class BouncyCastleCryptoService implements CryptoDomainService {
     @Override
     public String sm4Decrypt(String cipherText, String sm4KeyHex) {
         try {
-            byte[] keyBytes = Hex.decodeHex(sm4KeyHex.toCharArray());
+            // 验证输入参数
+            if (sm4KeyHex == null || sm4KeyHex.trim().isEmpty()) {
+                throw new IllegalArgumentException("SM4密钥不能为空");
+            }
+            if (cipherText == null || cipherText.trim().isEmpty()) {
+                throw new IllegalArgumentException("SM4密文不能为空");
+            }
+            
+            // 验证十六进制格式
+            String normalizedKey = sm4KeyHex.trim().toLowerCase();
+            if (!normalizedKey.matches("[0-9a-f]+")) {
+                log.error("SM4解密失败 - 密钥格式错误: 包含非十六进制字符. 密钥前缀: {}", 
+                        normalizedKey.length() > 4 ? normalizedKey.substring(0, 4) : normalizedKey);
+                throw new IllegalArgumentException("SM4密钥格式错误：必须是有效的十六进制字符串(0-9, a-f)");
+            }
+            
+            String normalizedCipherText = cipherText.trim().toLowerCase();
+            if (!normalizedCipherText.matches("[0-9a-f]+")) {
+                log.error("SM4解密失败 - 密文格式错误: 包含非十六进制字符. 密文前缀: {}", 
+                        normalizedCipherText.length() > 4 ? normalizedCipherText.substring(0, 4) : normalizedCipherText);
+                throw new IllegalArgumentException("SM4密文格式错误：必须是有效的十六进制字符串(0-9, a-f)");
+            }
+            
+            byte[] keyBytes = Hex.decodeHex(normalizedKey.toCharArray());
             SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "SM4");
             Cipher cipher = Cipher.getInstance("SM4/ECB/PKCS5Padding", "BC");
             cipher.init(Cipher.DECRYPT_MODE, keySpec);
-            byte[] cipherBytes = Hex.decodeHex(cipherText.toCharArray());
+            byte[] cipherBytes = Hex.decodeHex(normalizedCipherText.toCharArray());
             byte[] decrypted = cipher.doFinal(cipherBytes);
             return new String(decrypted, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (Exception e) {
+            log.error("SM4解密失败", e);
             throw new RuntimeException("SM4解密失败", e);
         }
     }

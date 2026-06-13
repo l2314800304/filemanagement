@@ -30,9 +30,8 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { getFileDetail, downloadFile } from '../api/file'
+import { getFileDetail, getDownloadUrl } from '../api/file'
 import { useAuthStore } from '../stores/auth'
-import { ElMessage } from 'element-plus'
 
 const route = useRoute()
 const authStore = useAuthStore()
@@ -59,20 +58,23 @@ async function loadFile() {
   }
 }
 
-async function handleDownload() {
-  try {
-    ElMessage.info('正在下载并解密文件...')
-    const { blob, fileName } = await downloadFile(file.value.id)
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = fileName
-    link.click()
-    URL.revokeObjectURL(link.href)
-    ElMessage.success('下载成功')
-  } catch (e) {
-    console.error(e)
-    ElMessage.error('下载失败: ' + (e.message || '未知错误'))
+function handleDownload() {
+  const url = getDownloadUrl(file.value.id)
+  const xhr = new XMLHttpRequest()
+  xhr.open('GET', url, true)
+  xhr.setRequestHeader('X-Auth-Token', authStore.token)
+  xhr.responseType = 'blob'
+  xhr.onload = () => {
+    if (xhr.status === 200 || xhr.status === 206) {
+      const blob = xhr.response
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = file.value.fileName
+      link.click()
+      URL.revokeObjectURL(link.href)
+    }
   }
+  xhr.send()
 }
 
 onMounted(loadFile)

@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 
 const api = axios.create({
   baseURL: 'http://localhost:8080',
-  timeout: 300000 // 5分钟，大文件加密需要较长时间
+  timeout: 120000
 })
 
 // 缓存SM2公钥
@@ -25,7 +25,8 @@ async function fetchPublicKey() {
 }
 
 /**
- * 请求拦截器 - 对所有请求进行SM4加密
+ * 请求拦截器 - 对认证相关请求进行SM4加密
+ * 文件上传/下载/访问不加密
  */
 api.interceptors.request.use(async (config) => {
   // 添加认证Token
@@ -34,8 +35,12 @@ api.interceptors.request.use(async (config) => {
     config.headers['X-Auth-Token'] = authStore.token
   }
 
-  // 仅 /api/crypto/public-key 不加密（引导接口）
-  if (config.url && config.url.includes('/crypto/public-key')) {
+  // 不加密的路径：公钥接口 + 文件相关接口
+  const isSkipPath = config.url && (
+    config.url.includes('/crypto/public-key') ||
+    config.url.includes('/api/file')
+  )
+  if (isSkipPath) {
     return config
   }
 
@@ -68,12 +73,22 @@ api.interceptors.request.use(async (config) => {
 })
 
 /**
- * 响应拦截器 - 对所有响应进行SM4解密
+ * 响应拦截器 - 对加密响应进行SM4解密
+ * 文件相关响应不加密
  */
 api.interceptors.response.use(
   (response) => {
-    // 仅 /api/crypto/public-key 不解密
-    if (response.config.url && response.config.url.includes('/crypto/public-key')) {
+    // 不加密的路径：公钥接口 + 文件相关接口
+    const isSkipPath = response.config.url && (
+      response.config.url.includes('/crypto/public-key') ||
+      response.config.url.includes('/api/file')
+    )
+    if (isSkipPath) {
+      // 统一错误处理（未加密响应）
+      if (response.data && response.data.code !== undefined && response.data.code !== 200) {
+        ElMessage.error(response.data.message || '请求失败')
+        return Promise.reject(new Error(response.data.message))
+      }
       return response
     }
 
